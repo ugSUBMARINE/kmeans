@@ -78,16 +78,13 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
 /// :return
 /// *   centroids: indices of data points to be used as centroids
 fn initialize_cluster(data: &Vec<f32>, k: usize, sigle_data_len: usize) -> Vec<usize> {
-    let mut centroids: Vec<usize> = Vec::with_capacity(k);
     let mut data_idx: Vec<usize> = (0..data.len() / sigle_data_len).collect();
-    centroids.push(data_idx[data_idx.len() - 1]);
-    data_idx.pop().unwrap();
-    for c in 0..(k - 1) {
+    for c in 1..k {
         print!("\rCentroids initiated {}", c);
-        let next_centroid_idx = data_idx
+        let next_centroid_idx = data_idx[c - 1..]
             .iter()
             .map(|d| {
-                centroids.iter().fold(f32::INFINITY, |a, &b| {
+                data_idx[..c].iter().fold(f32::INFINITY, |a, &b| {
                     a.min(dist_calc(
                         &data[*d * sigle_data_len..((*d + 1) * sigle_data_len)],
                         &data[b * sigle_data_len..((b + 1) * sigle_data_len)],
@@ -96,13 +93,13 @@ fn initialize_cluster(data: &Vec<f32>, k: usize, sigle_data_len: usize) -> Vec<u
             })
             .enumerate()
             .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(idx, _)| idx)
+            .map(|(idx, _)| idx + (c - 1))
             .unwrap();
-        centroids.push(data_idx[next_centroid_idx]);
-        data_idx.swap_remove(next_centroid_idx);
+        // swap new centroid idx with first non centroid element in data_idx
+        data_idx.swap(c, next_centroid_idx);
     }
     println!("");
-    centroids
+    data_idx[..k].to_vec()
 }
 
 /// Calculate the meand 1d vec (centroid) form a vec containing data of multiple data points
@@ -143,7 +140,6 @@ fn kmeans(
     for iteration in 0..iterations {
         print!("\rStarting iteration {}", iteration);
         // find the closest centroid for each data point
-        // println!("{:?}", cluster_asign);
         cluster_asign.iter_mut().enumerate().for_each(|(cx, x)| {
             centroids
                 .chunks_exact(sigle_data_len)
@@ -153,64 +149,27 @@ fn kmeans(
                 .map(|(idx, _)| *x = idx)
                 .unwrap()
         });
-        /*
-                for (ci, i) in cluster_asign.iter().enumerate() {
-                    println!(
-                        "{:?} {:?}",
-                        &data[ci * sigle_data_len..((ci + 1) * sigle_data_len)],
-                        &centroids[i * sigle_data_len..((i + 1) * sigle_data_len)]
-                    );
-                }
-        */
-        // println!("{:?}", cluster_asign);
-        // println!("{:?}", centroids);
+
         for cn in 0..n_cluster {
             // number of members of the cluster
             let n_cn = cluster_asign.iter().filter(|&x| *x == cn).count();
-            /*
-                        println!(
-                            ">>{:?}",
-                            mean_by_idx(
-                                &data,
-                                &cluster_asign
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, &x)| x == cn)
-                                    .map(|(cx, _)| cx)
-                                    .collect::<Vec<usize>>(),
-                                sigle_data_len
-                            )
-                        );
-            */
-            let cn_cent = mean_by_idx(
-                &data,
-                &cluster_asign
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, &x)| x == cn)
-                    .map(|(cx, _)| cx)
-                    .collect::<Vec<usize>>(),
-                sigle_data_len,
-            );
-            /*
             // calculate new centroid of assigned points to cluster cn
-            let cn_cent = cluster_asign.iter().filter(|&x| *x == cn).fold(
-                vec![0.0; sigle_data_len],
-                |a, b| {
+            let cn_cent = cluster_asign
+                .iter()
+                .enumerate()
+                .filter(|(_, &x)| x == cn)
+                .fold(vec![0.0; sigle_data_len], |a, b| {
                     a.iter()
                         .enumerate()
                         .map(|(cy, y)| {
-                            y + data[b * sigle_data_len..((b + 1) * sigle_data_len)][cy]
+                            y + data[b.0 * sigle_data_len..((b.0 + 1) * sigle_data_len)][cy]
                                 / (n_cn as f32)
                         })
                         .collect()
-                },
-            );
-            */
+                });
             centroids[cn * sigle_data_len..((cn + 1) * sigle_data_len)]
                 .copy_from_slice(&cn_cent[..]);
         }
-        // println!("{:?}", centroids);
         // the sum of euclidean distances to all points to their cluster centers
         let interia = cluster_asign.iter().enumerate().fold(0.0, |sum, (cx, x)| {
             sum + dist_calc(
@@ -222,13 +181,14 @@ fn kmeans(
         // how much the inertia changed from last iteration
         let delta_inertia = best_inertia - interia;
         if delta_inertia.abs() <= tol {
-            println!("Delta inertia tolerance reached - stopping");
+            println!("\nDelta inertia tolerance reached - stopping");
             break;
         }
         if delta_inertia > 0.0 {
             best_inertia = interia;
         }
     }
+    println!("")
 }
 
 fn main() {
@@ -243,17 +203,18 @@ fn main() {
     */
     let bytes = std::fs::read("./test_data.npy").unwrap();
     let sample_data = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
-    /*
-    let sample_data = vec![
-        1., 1., 1., 2., 2., 2., 3., 3., 3., 4., 4., 4., 5., 5., 5., 1., 1., 1., 2., 2., 2., 3., 3.,
-        3., 4., 4., 4., 5., 5., 5., 1., 1., 1., 2., 2., 2., 3., 3., 3., 4., 4., 4., 5., 5., 5., 1.,
-        1., 1., 2., 2., 2., 3., 3., 3., 4., 4., 4., 5., 5., 5., 1., 1., 1., 2., 2., 2., 3., 3., 3.,
-        4., 4., 4., 5., 5., 5.,
-    ];
-    */
-    let single_data_size = 2;
-    let n_cluster = 500;
+
+    let single_data_size = 16;
+    let n_cluster = 400;
+
     let centroids = initialize_cluster(&sample_data, n_cluster, single_data_size);
+    /*
+    let file = File::create("cluster_centroids_rs.txt").unwrap();
+    let mut file = BufWriter::new(file);
+    for v in &centroids {
+        writeln!(file, "{}", v).unwrap();
+    }
+    */
     let mut centroids: Vec<f32> = centroids
         .iter()
         .flat_map(|x| sample_data[x * single_data_size..((x + 1) * single_data_size)].to_vec())
@@ -264,7 +225,7 @@ fn main() {
         &mut centroids,
         &mut cluster_asign,
         single_data_size,
-        199,
+        200,
         n_cluster,
         1e-4,
     );
