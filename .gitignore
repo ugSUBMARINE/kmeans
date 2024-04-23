@@ -1,0 +1,5 @@
+/target
+*.py
+*.csv
+*.png
+*.txt
