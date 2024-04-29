@@ -1,10 +1,9 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
+// #![allow(unused_variables)]
+// #![allow(dead_code)]
+// #![allow(unused_imports)]
 
 use npyz::NpyFile;
 use rayon::prelude::*;
-use std::borrow::Borrow;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use walkdir::WalkDir;
@@ -48,7 +47,8 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
     }
     let mut all_triu: Vec<f32> = vec![];
 
-    for path in WalkDir::new(&base_file_path)
+    let mut path_count = 1;
+    for path in WalkDir::new(base_file_path)
         .into_iter()
         .filter(|s| {
             s.as_ref()
@@ -61,7 +61,13 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
         .map(|e| e.unwrap())
     {
         let bytes = std::fs::read(path.path()).unwrap();
-        let npy = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
+        let npy: Vec<f32> = NpyFile::new(&bytes[..])
+            .unwrap()
+            .into_vec::<f64>()
+            .unwrap()
+            .iter()
+            .map(|x| *x as f32)
+            .collect();
         let npyoi_pre = npy.chunks_exact(total_mat_size as usize);
         if !npyoi_pre.remainder().is_empty() {
             panic!(
@@ -78,7 +84,10 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
             })
             .collect::<Vec<f32>>();
         all_triu.append(&mut npyoi);
+        print!("\rMatrix files read {}", path_count);
+        path_count += 1;
     }
+    println!();
     all_triu
 }
 
@@ -111,7 +120,7 @@ fn initialize_cluster(data: &Vec<f32>, k: usize, single_data_len: usize) -> Vec<
         // swap new centroid idx with first non centroid element in data_idx
         data_idx.swap(c, next_centroid_idx);
     }
-    println!("");
+    println!();
     data_idx[..k].to_vec()
 }
 
@@ -167,11 +176,11 @@ fn kmeans(
             .enumerate()
             .flat_map(|(cx, x)| {
                 x.iter_mut()
-                    .map(|y| *y / &cluster_nums[cx])
+                    .map(|y| *y / cluster_nums[cx])
                     .collect::<Vec<f32>>()
             })
             .collect::<Vec<f32>>();
-        let center_shift = par_dist_calc(&centroids, &ncn).powi(2);
+        let center_shift = par_dist_calc(centroids, &ncn).powi(2);
         centroids.copy_from_slice(&ncn[..]);
 
         // the sum of euclidean distances to all points to their cluster centers
@@ -191,35 +200,29 @@ fn kmeans(
             .reduce(|| 0.0, |a: f32, b: f32| a + b);
         // how much the inertia changed from last iteration
         if center_shift <= tol {
-            println!("\nCluster shift tolerance reached {}", center_shift);
+            println!(
+                "\nCluster shift tolerance reached {} with inertia of {}",
+                center_shift, interia
+            );
             break;
         }
     }
-    println!("")
+    println!()
 }
 
 fn main() {
-    /*
-    TEST SHAPE matrices_16clean and plane.npy and their for small nr of matrices_16clean whether the triu matches
-    let matrix_data = get_matrices(
-        // "/media/gwirn/D/alphafold_models/ecoli/matrices_16clean/".to_string(),
-        "./".to_string(),
-        3,
+    // TEST SHAPE matrices_16clean and plane.npy and their for small nr of matrices_16clean whether the triu matches
+    let sample_data = get_matrices(
+        "/media/gwirn/D/alphafold_models/ecoli/matrices_16clean/".to_string(),
+        16,
     );
-    println!("{}", matrix_data.len())
-    */
-    let bytes = std::fs::read("./test_data.npy").unwrap();
-    let sample_data = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
+    // let bytes = std::fs::read("./test_data.npy").unwrap();
+    // let sample_data = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
 
-    let single_data_size = 2;
-    let n_cluster = 4;
+    let single_data_size = 120;
+    let n_cluster = 4000;
 
     let centroids = initialize_cluster(&sample_data, n_cluster, single_data_size);
-    let file = File::create("initial_centroids_rs.txt").unwrap();
-    let mut file = BufWriter::new(file);
-    for v in &centroids {
-        writeln!(file, "{}", v).unwrap();
-    }
     let mut centroids: Vec<f32> = centroids
         .par_iter()
         .flat_map(|x| sample_data[x * single_data_size..((x + 1) * single_data_size)].to_vec())
@@ -234,7 +237,6 @@ fn main() {
         n_cluster,
         1e-4,
     );
-    // println!("{:?}", cluster_asign);
     let file = File::create("cluster_rs.txt").unwrap();
     let mut file = BufWriter::new(file);
     for v in cluster_asign {
