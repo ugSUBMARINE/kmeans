@@ -1,6 +1,6 @@
-// #![allow(unused_variables)]
-// #![allow(dead_code)]
-// #![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
 
 use npyz::NpyFile;
 use rayon::prelude::*;
@@ -91,15 +91,14 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
     all_triu
 }
 
-/// Get indices of the data to create initial clusters for k-means
+/// Get indices of the data to create initial clusters for k-means via kmeans++
 /// :parameter
 /// *   data: the data to be clustered
 /// *   k: the number of clusters to be created
 /// *   single_data_len: length of a single piece of data in the data
 /// :return
-/// *   centroids: indices of data points to be used as centroids
-// fn initialize_cluster(data: &Vec<f32>, k: usize, single_data_len: usize) -> (Vec<usize>, Vec<f32>) {
-fn initialize_cluster(data: &Vec<f32>, k: usize, single_data_len: usize) -> Vec<usize> {
+/// *   centroids: coordinates of data points to be used as centroids
+fn initialize_plus_plus(data: &Vec<f32>, k: usize, single_data_len: usize) -> Vec<f32> {
     let mut data_idx: Vec<usize> = (0..data.len() / single_data_len).collect();
     for c in 1..k {
         print!("\rCentroids initiated {}", c);
@@ -121,7 +120,42 @@ fn initialize_cluster(data: &Vec<f32>, k: usize, single_data_len: usize) -> Vec<
         data_idx.swap(c, next_centroid_idx);
     }
     println!();
-    data_idx[..k].to_vec()
+    let centroids: Vec<f32> = data_idx[..k]
+        .par_iter()
+        .flat_map(|x| data[x * single_data_len..((x + 1) * single_data_len)].to_vec())
+        .collect();
+    centroids
+}
+
+/// Get indices of the data to create initial clusters for k-means via naive sharding
+/// :parameter
+/// *   data: the data to be clustered
+/// *   k: the number of clusters to be created
+/// *   single_data_len: length of a single piece of data in the data
+/// :return
+/// *   centroids: coordinates of data points to be used as centroids
+fn naive_sharding(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
+    let val_sum = data
+        .chunks_exact(single_data_len)
+        .map(|x| x.iter().sum::<f32>())
+        .collect::<Vec<f32>>();
+    let mut init_idx: Vec<usize> = (0..val_sum.len()).collect();
+    init_idx.sort_by(|i, j| val_sum[*i].partial_cmp(&val_sum[*j]).unwrap());
+    let chunk_size = (init_idx.len() as f32 / k as f32).floor() as usize;
+    let mut ncent: Vec<f32> = vec![0.; k * single_data_len];
+    for (ci, i) in init_idx.chunks_exact(chunk_size).enumerate() {
+        print!("\rCentroids initiated {}", ci);
+        let i_size = i.len() as f32;
+        let i_vec = i.iter().fold(vec![0.; single_data_len], |acc, idx| {
+            acc.iter()
+                .enumerate()
+                .map(|(ix, x)| x + data[idx * single_data_len + ix] / i_size)
+                .collect()
+        });
+        ncent[single_data_len * ci..((ci + 1) * single_data_len)].copy_from_slice(&i_vec[..]);
+    }
+    println!();
+    ncent
 }
 
 /*
@@ -184,7 +218,7 @@ fn kmeans(
         centroids.copy_from_slice(&ncn[..]);
 
         // the sum of euclidean distances to all points to their cluster centers
-        let interia = cluster_asign
+        let inertia = cluster_asign
             .par_iter()
             .enumerate()
             .fold(
@@ -202,31 +236,41 @@ fn kmeans(
         if center_shift <= tol {
             println!(
                 "\nCluster shift tolerance reached {} with inertia of {}",
-                center_shift, interia
+                center_shift, inertia
             );
             break;
         }
+        if iteration == iterations - 1 {
+            println!(
+                "\nClusterind iteration max reached with inertia of {}",
+                inertia
+            );
+        }
     }
-    println!()
+    println!();
 }
 
 fn main() {
     // TEST SHAPE matrices_16clean and plane.npy and their for small nr of matrices_16clean whether the triu matches
+    /*
     let sample_data = get_matrices(
         "/media/gwirn/D/alphafold_models/ecoli/matrices_16clean/".to_string(),
         16,
     );
-    // let bytes = std::fs::read("./test_data.npy").unwrap();
-    // let sample_data = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
+    */
+    let bytes = std::fs::read("./test_data.npy").unwrap();
+    let sample_data = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
 
-    let single_data_size = 120;
-    let n_cluster = 4000;
+    let single_data_size = 2;
+    let n_cluster = 800;
 
-    let centroids = initialize_cluster(&sample_data, n_cluster, single_data_size);
-    let mut centroids: Vec<f32> = centroids
-        .par_iter()
-        .flat_map(|x| sample_data[x * single_data_size..((x + 1) * single_data_size)].to_vec())
-        .collect();
+    // let mut centroids = initialize_plus_plus(&sample_data, n_cluster, single_data_size);
+    let mut centroids = naive_sharding(&sample_data, n_cluster, single_data_size);
+    let file = File::create("initial_centroids_rs.txt").unwrap();
+    let mut file = BufWriter::new(file);
+    for v in centroids.chunks_exact(single_data_size) {
+        writeln!(file, "{:?}", v).unwrap();
+    }
     let mut cluster_asign = vec![0; sample_data.len() / single_data_size];
     kmeans(
         &sample_data,
