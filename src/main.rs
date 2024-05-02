@@ -140,7 +140,7 @@ fn naive_sharding(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
         .map(|x| x.iter().sum::<f32>())
         .collect::<Vec<f32>>();
     let mut init_idx: Vec<usize> = (0..val_sum.len()).collect();
-    init_idx.sort_by(|i, j| val_sum[*i].partial_cmp(&val_sum[*j]).unwrap());
+    init_idx.par_sort_by(|i, j| val_sum[*i].partial_cmp(&val_sum[*j]).unwrap());
     let chunk_size = (init_idx.len() as f32 / k as f32).floor() as usize;
     let mut ncent: Vec<f32> = vec![0.; k * single_data_len];
     for (ci, i) in init_idx.chunks_exact(chunk_size).enumerate() {
