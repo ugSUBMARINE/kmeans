@@ -1,4 +1,5 @@
 #![allow(unused_variables)]
+#![allow(unused_mut)]
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
@@ -98,7 +99,7 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
 /// *   single_data_len: length of a single piece of data in the data
 /// :return
 /// *   centroids: coordinates of data points to be used as centroids
-fn initialize_plus_plus(data: &Vec<f32>, k: usize, single_data_len: usize) -> Vec<f32> {
+fn maxmin_init(data: &Vec<f32>, k: usize, single_data_len: usize) -> Vec<f32> {
     let mut data_idx: Vec<usize> = (0..data.len() / single_data_len).collect();
     for c in 1..k {
         print!("\rCentroids initiated {}", c);
@@ -128,36 +129,101 @@ fn initialize_plus_plus(data: &Vec<f32>, k: usize, single_data_len: usize) -> Ve
 }
 
 /// Get indices of the data to create initial clusters for k-means via naive sharding
+///     Sort data according to the sum of their attributes
+///     split them in K chunks and calculate the mean of these data points as a centroid
 /// :parameter
 /// *   data: the data to be clustered
 /// *   k: the number of clusters to be created
 /// *   single_data_len: length of a single piece of data in the data
 /// :return
 /// *   centroids: coordinates of data points to be used as centroids
-fn naive_sharding(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
+fn naive_sharding_init(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
     let val_sum = data
         .chunks_exact(single_data_len)
         .map(|x| x.iter().sum::<f32>())
         .collect::<Vec<f32>>();
     let mut init_idx: Vec<usize> = (0..val_sum.len()).collect();
-    init_idx.par_sort_by(|i, j| val_sum[*i].partial_cmp(&val_sum[*j]).unwrap());
+    // init_idx.par_sort_by(|i, j| val_sum[*i].partial_cmp(&val_sum[*j]).unwrap());
+    init_idx.par_sort_by(|i, j| val_sum[*i].total_cmp(&val_sum[*j]));
     let chunk_size = (init_idx.len() as f32 / k as f32).floor() as usize;
     let mut ncent: Vec<f32> = vec![0.; k * single_data_len];
-    for (ci, i) in init_idx.chunks_exact(chunk_size).enumerate() {
+    let mut idx_chunks = init_idx.chunks_exact(chunk_size).enumerate().peekable();
+    for (ci, i) in idx_chunks.by_ref() {
         print!("\rCentroids initiated {}", ci);
-        let i_size = i.len() as f32;
-        let i_vec = i.iter().fold(vec![0.; single_data_len], |acc, idx| {
-            acc.iter()
-                .enumerate()
-                .map(|(ix, x)| x + data[idx * single_data_len + ix] / i_size)
-                .collect()
-        });
-        ncent[single_data_len * ci..((ci + 1) * single_data_len)].copy_from_slice(&i_vec[..]);
+        if ci < k - 1 {
+            let i_size = i.len() as f32;
+            let i_vec = i.iter().fold(vec![0.; single_data_len], |acc, idx| {
+                acc.iter()
+                    .enumerate()
+                    .map(|(ix, x)| x + data[idx * single_data_len + ix] / i_size)
+                    .collect()
+            });
+            ncent[single_data_len * ci..((ci + 1) * single_data_len)].copy_from_slice(&i_vec[..]);
+        } else {
+            break;
+        }
     }
+    let n_remainders = idx_chunks.len() as f32;
+    if idx_chunks.peek().is_some() {
+        let mut remainder = vec![0.; single_data_len];
+        for (_, i) in idx_chunks {
+            let i_size = i.len() as f32;
+            let i_vec = i.iter().fold(vec![0.; single_data_len], |acc, idx| {
+                acc.iter()
+                    .enumerate()
+                    .map(|(ix, x)| x + data[idx * single_data_len + ix] / i_size)
+                    .collect()
+            });
+            for (cn, n) in i_vec.iter().enumerate() {
+                remainder[cn] += n / n_remainders
+            }
+        }
+        ncent[(k - 1) * single_data_len..k * single_data_len].copy_from_slice(&remainder[..]);
+        print!("\rCentroids initiated {}", k);
+    };
     println!();
     ncent
 }
 
+/// Get indices of the data to create initial clusters for k-means via hartigan method
+///     Sort all point according to their distance to the mean point and then select K cluster from
+///     N dataspoints based on their indices with (1 +  (i − 1)N/K)
+/// :parameter
+/// *   data: the data to be clustered
+/// *   k: the number of clusters to be created
+/// *   single_data_len: length of a single piece of data in the data
+/// :return
+/// *   centroids: coordinates of data points to be used as centroids
+fn hartigan_init(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
+    let n_samples = (data.len() / single_data_len) as f32;
+    let kf = k as f32;
+    let mean_point =
+        data.chunks_exact(single_data_len)
+            .fold(vec![0.; single_data_len], |acc, chunk| {
+                acc.iter()
+                    .enumerate()
+                    .map(|(cx, x)| x + (chunk[cx] / n_samples))
+                    .collect()
+            });
+    let dist_to_mean: Vec<f32> = data
+        .par_chunks_exact(single_data_len)
+        .map(|x| dist_calc(x, &mean_point))
+        .collect();
+    let mut dist_sort = (0..dist_to_mean.len()).collect::<Vec<_>>();
+    dist_sort.sort_by(|&i, &j| dist_to_mean[i].total_cmp(&dist_to_mean[j]));
+
+    let data_idx: Vec<usize> = (0..k)
+        .into_par_iter()
+        .map(|x| (1. + (x as f32 - 1.) * n_samples / kf) as usize)
+        .collect();
+
+    let centroids: Vec<f32> = data_idx
+        .par_iter()
+        .flat_map(|x| data[x * single_data_len..((x + 1) * single_data_len)].to_vec())
+        .collect();
+
+    centroids
+}
 /*
 Initialize k means with random values
 --> For a given number of iterations:
@@ -264,8 +330,9 @@ fn main() {
     let single_data_size = 2;
     let n_cluster = 800;
 
-    // let mut centroids = initialize_plus_plus(&sample_data, n_cluster, single_data_size);
-    let mut centroids = naive_sharding(&sample_data, n_cluster, single_data_size);
+    // let mut centroids = maxmin_init(&sample_data, n_cluster, single_data_size);
+    // let mut centroids = naive_sharding_init(&sample_data, n_cluster, single_data_size);
+    let mut centroids = hartigan_init(&sample_data, n_cluster, single_data_size);
     let file = File::create("initial_centroids_rs.txt").unwrap();
     let mut file = BufWriter::new(file);
     for v in centroids.chunks_exact(single_data_size) {
