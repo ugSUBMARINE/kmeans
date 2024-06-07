@@ -3,13 +3,17 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use clap::Parser;
 use npyz::NpyFile;
 use rayon::prelude::*;
 use std::collections::HashSet;
-use std::fs::File;
+use std::error::Error;
+use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
+use std::path::Path;
 use std::usize;
 use walkdir::WalkDir;
+
 /// Calculate the euclidean distance between two 1D vec
 /// :parameter
 /// *   `arr1`, `arr2`: vec between which the distance should be calculated
@@ -41,14 +45,14 @@ fn par_dist_calc(arr1: &[f32], arr2: &[f32]) -> f32 {
 /// :return
 /// *   `all_triu`: 1D vec containing all the upper triangle
 fn get_matrices(
-    base_file_path: &str,
-    side_len: i32,
+    base_file_path: String,
+    side_len: usize,
 ) -> Result<(Vec<f32>, Vec<String>), std::io::Error> {
     let total_mat_size = side_len * side_len;
     let mut triu_idx: Vec<usize> = vec![];
     for i in 0..side_len {
         for j in i + 1..side_len {
-            triu_idx.push((side_len * i + j) as usize)
+            triu_idx.push(side_len * i + j)
         }
     }
     let mut all_triu: Vec<f32> = vec![];
@@ -74,7 +78,7 @@ fn get_matrices(
             .iter()
             .map(|x| *x as f32)
             .collect();
-        let npyoi_pre = npy.chunks_exact(total_mat_size as usize);
+        let npyoi_pre = npy.chunks_exact(total_mat_size);
         if !npyoi_pre.remainder().is_empty() {
             panic!(
                 "npy data size is not compatible with given side_len {}",
@@ -340,21 +344,51 @@ fn find_representative(
         .map(|(idx, _)| idx)
 }
 
+/// KMeans clustering for np distance matrices
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// file path to the npy file stored matrices
+    #[arg(short, long)]
+    inpath: String,
+
+    /// file path where the cluster results should be stored
+    #[arg(short, long)]
+    outpath: String,
+
+    /// Side length of the distance matrices
+    #[arg(short, long)]
+    side_len: usize,
+
+    /// number of clusters to build
+    #[arg(short, long)]
+    n_cluster: usize,
+
+    /// initialization method
+    #[arg(short, long, default_value = "minmax")]
+    m_init: String,
+}
+
 fn main() {
-    let (data, fpaths) = get_matrices("./test_data/", 4).unwrap();
-    let file = File::create("fpaths.txt").unwrap();
+    let args = Args::parse();
+    fs::create_dir_all(&args.outpath).unwrap();
+    let (data, fpaths) = get_matrices(args.inpath, args.side_len).unwrap();
+    let file = File::create(Path::new(&args.outpath).join("fpaths.txt")).unwrap();
     let mut file = BufWriter::new(file);
     for v in fpaths {
         writeln!(file, "{:?}", v).unwrap()
     }
 
-    let single_data_size = 6;
-    let n_cluster = 4;
+    let single_data_size = args.side_len;
+    let n_cluster = args.side_len;
 
-    // let mut centroids = maxmin_init(&data, n_cluster, single_data_size);
-    // let mut centroids = naive_sharding_init(&data, n_cluster, single_data_size);
-    let mut centroids = hartigan_init(&data, n_cluster, single_data_size);
-    let file = File::create("initial_centroids_rs.txt").unwrap();
+    let mut centroids = match args.m_init.as_str() {
+        "minmax" => maxmin_init(&data, n_cluster, single_data_size),
+        "sharding" => naive_sharding_init(&data, n_cluster, single_data_size),
+        "hart" => hartigan_init(&data, n_cluster, single_data_size),
+        _ => panic!("Invalid initialization method '{}'", args.m_init),
+    };
+    let file = File::create(Path::new(&args.outpath).join("initial_centroids_rs.txt")).unwrap();
     let mut file = BufWriter::new(file);
     for v in centroids.chunks_exact(single_data_size) {
         writeln!(file, "{:?}", v).unwrap();
@@ -369,7 +403,7 @@ fn main() {
         n_cluster,
         1e-4,
     );
-    let file = File::create("cluster_rs.txt").unwrap();
+    let file = File::create(Path::new(&args.outpath).join("cluster_rs.txt")).unwrap();
     let mut file = BufWriter::new(file);
     for v in &cluster_asign {
         writeln!(file, "{}", v).unwrap();
@@ -384,7 +418,7 @@ fn main() {
             .filter(|(_, (_, &c))| c == i)
             .map(|(cx, (x, &c))| (cx, x))
             .unzip();
-        let repr = match find_representative(test_sup, &cluster_asign, i, single_data_size) {
+        match find_representative(test_sup, &cluster_asign, i, single_data_size) {
             Some(x) => {
                 cluster_rep_idx.push(tsidx[x]);
             }
@@ -395,7 +429,7 @@ fn main() {
         };
     }
     println!();
-    let file = File::create("representatives.txt").unwrap();
+    let file = File::create(Path::new(&args.outpath).join("representatives.txt")).unwrap();
     let mut file = BufWriter::new(file);
     for v in cluster_rep_idx {
         writeln!(file, "{:?}", v).unwrap()
