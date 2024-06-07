@@ -5,8 +5,10 @@
 
 use npyz::NpyFile;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
+use std::usize;
 use walkdir::WalkDir;
 /// Calculate the euclidean distance between two 1D vec
 /// :parameter
@@ -38,7 +40,10 @@ fn par_dist_calc(arr1: &[f32], arr2: &[f32]) -> f32 {
 /// *   `side_len`: length of the distance matrix
 /// :return
 /// *   `all_triu`: 1D vec containing all the upper triangle
-fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
+fn get_matrices(
+    base_file_path: &str,
+    side_len: i32,
+) -> Result<(Vec<f32>, Vec<String>), std::io::Error> {
     let total_mat_size = side_len * side_len;
     let mut triu_idx: Vec<usize> = vec![];
     for i in 0..side_len {
@@ -47,6 +52,7 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
         }
     }
     let mut all_triu: Vec<f32> = vec![];
+    let mut all_paths: Vec<String> = vec![];
 
     let mut path_count = 1;
     for path in WalkDir::new(base_file_path)
@@ -61,11 +67,10 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
         })
         .map(|e| e.unwrap())
     {
-        let bytes = std::fs::read(path.path()).unwrap();
-        let npy: Vec<f32> = NpyFile::new(&bytes[..])
-            .unwrap()
-            .into_vec::<f64>()
-            .unwrap()
+        all_paths.push(path.path().to_str().unwrap().to_string());
+        let bytes = std::fs::read(path.path())?;
+        let npy: Vec<f32> = NpyFile::new(&bytes[..])?
+            .into_vec::<f64>()?
             .iter()
             .map(|x| *x as f32)
             .collect();
@@ -89,7 +94,7 @@ fn get_matrices(base_file_path: String, side_len: i32) -> Vec<f32> {
         path_count += 1;
     }
     println!();
-    all_triu
+    Ok((all_triu, all_paths))
 }
 
 /// Get indices of the data to create initial clusters for k-means via kmeans++
@@ -313,34 +318,50 @@ fn kmeans(
             );
         }
     }
-    println!();
+}
+
+/// find the member of the cluster with the minimum distance to all other members
+/// therefore the most representative (most similar to all other ones) of the cluster
+/// :parameter
+/// *   data: the data that represents all members of the cluster
+/// *   single_data_len: length of a single piece of data in the data
+/// :return
+/// *   the index of the member with the closest distance to all others
+fn find_representative(
+    data: Vec<&[f32]>,
+    cluster: &[usize],
+    coi: usize,
+    single_data_len: usize,
+) -> Option<usize> {
+    data.par_iter()
+        .map(|x| data.iter().map(|y| dist_calc(x, y)).sum::<f32>())
+        .enumerate()
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(idx, _)| idx)
 }
 
 fn main() {
-    // TEST SHAPE matrices_16clean and plane.npy and their for small nr of matrices_16clean whether the triu matches
-    /*
-    let sample_data = get_matrices(
-        "/media/gwirn/D/alphafold_models/ecoli/matrices_16clean/".to_string(),
-        16,
-    );
-    */
-    let bytes = std::fs::read("./test_data.npy").unwrap();
-    let sample_data = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
+    let (data, fpaths) = get_matrices("./test_data/", 4).unwrap();
+    let file = File::create("fpaths.txt").unwrap();
+    let mut file = BufWriter::new(file);
+    for v in fpaths {
+        writeln!(file, "{:?}", v).unwrap()
+    }
 
-    let single_data_size = 2;
-    let n_cluster = 800;
+    let single_data_size = 6;
+    let n_cluster = 4;
 
-    // let mut centroids = maxmin_init(&sample_data, n_cluster, single_data_size);
-    // let mut centroids = naive_sharding_init(&sample_data, n_cluster, single_data_size);
-    let mut centroids = hartigan_init(&sample_data, n_cluster, single_data_size);
+    // let mut centroids = maxmin_init(&data, n_cluster, single_data_size);
+    // let mut centroids = naive_sharding_init(&data, n_cluster, single_data_size);
+    let mut centroids = hartigan_init(&data, n_cluster, single_data_size);
     let file = File::create("initial_centroids_rs.txt").unwrap();
     let mut file = BufWriter::new(file);
     for v in centroids.chunks_exact(single_data_size) {
         writeln!(file, "{:?}", v).unwrap();
     }
-    let mut cluster_asign = vec![0; sample_data.len() / single_data_size];
+    let mut cluster_asign = vec![0; data.len() / single_data_size];
     kmeans(
-        &sample_data,
+        &data,
         &mut centroids,
         &mut cluster_asign,
         single_data_size,
@@ -350,7 +371,33 @@ fn main() {
     );
     let file = File::create("cluster_rs.txt").unwrap();
     let mut file = BufWriter::new(file);
-    for v in cluster_asign {
+    for v in &cluster_asign {
         writeln!(file, "{}", v).unwrap();
+    }
+    let mut cluster_rep_idx: Vec<usize> = Vec::with_capacity(n_cluster);
+    for i in 0..n_cluster {
+        print!("\rRepresentative search cluster {}", i);
+        let (tsidx, test_sup): (Vec<_>, Vec<_>) = data
+            .par_chunks_exact(single_data_size)
+            .zip(cluster_asign.par_iter())
+            .enumerate()
+            .filter(|(_, (_, &c))| c == i)
+            .map(|(cx, (x, &c))| (cx, x))
+            .unzip();
+        let repr = match find_representative(test_sup, &cluster_asign, i, single_data_size) {
+            Some(x) => {
+                cluster_rep_idx.push(tsidx[x]);
+            }
+            None => {
+                println!("No cluster representative for {}", i);
+                continue;
+            }
+        };
+    }
+    println!();
+    let file = File::create("representatives.txt").unwrap();
+    let mut file = BufWriter::new(file);
+    for v in cluster_rep_idx {
+        writeln!(file, "{:?}", v).unwrap()
     }
 }
