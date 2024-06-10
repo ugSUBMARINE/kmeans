@@ -1,15 +1,13 @@
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
+// #![allow(unused_variables)]
+// #![allow(unused_mut)]
+// #![allow(dead_code)]
+// #![allow(unused_imports)]
 
 use clap::Parser;
 use npyz::NpyFile;
 use rayon::prelude::*;
-use std::collections::HashSet;
-use std::error::Error;
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::usize;
 use walkdir::WalkDir;
@@ -331,12 +329,7 @@ fn kmeans(
 /// *   single_data_len: length of a single piece of data in the data
 /// :return
 /// *   the index of the member with the closest distance to all others
-fn find_representative(
-    data: Vec<&[f32]>,
-    cluster: &[usize],
-    coi: usize,
-    single_data_len: usize,
-) -> Option<usize> {
+fn find_representative(data: Vec<&[f32]>) -> Option<usize> {
     data.par_iter()
         .map(|x| data.iter().map(|y| dist_calc(x, y)).sum::<f32>())
         .enumerate()
@@ -380,7 +373,7 @@ fn main() {
     }
 
     let single_data_size = args.side_len;
-    let n_cluster = args.side_len;
+    let n_cluster = args.n_cluster;
 
     let mut centroids = match args.m_init.as_str() {
         "minmax" => maxmin_init(&data, n_cluster, single_data_size),
@@ -416,9 +409,9 @@ fn main() {
             .zip(cluster_asign.par_iter())
             .enumerate()
             .filter(|(_, (_, &c))| c == i)
-            .map(|(cx, (x, &c))| (cx, x))
+            .map(|(cx, (x, _))| (cx, x))
             .unzip();
-        match find_representative(test_sup, &cluster_asign, i, single_data_size) {
+        match find_representative(test_sup) {
             Some(x) => {
                 cluster_rep_idx.push(tsidx[x]);
             }
