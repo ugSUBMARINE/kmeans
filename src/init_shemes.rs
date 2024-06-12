@@ -188,7 +188,6 @@ pub fn grid_init(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
             for j in 1..(grid_side_len as usize) {
                 i_range[j] = i_range[j - 1] + dx
             }
-            println!("{}", i_range.len());
             i_range
         });
     }

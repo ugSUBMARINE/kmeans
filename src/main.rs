@@ -158,6 +158,7 @@ fn main() {
 
     let single_data_size = args.side_len;
     let n_cluster = args.n_cluster;
+    println!("Matrices found {}", data.len() / single_data_size);
 
     let mut centroids = match args.m_init.as_str() {
         "minmax" => maxmin_init(&data, n_cluster, single_data_size),
