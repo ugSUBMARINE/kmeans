@@ -3,7 +3,9 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use crate::init_shemes::{grid_init, hartigan_init, maxmin_init, naive_sharding_init};
+use crate::init_shemes::{
+    grid_init, hartigan_init, maxmin_init, naive_sharding_init, simple_cluster_seek,
+};
 use crate::utils::{dist_calc, get_matrices, par_dist_calc, run_test};
 use clap::Parser;
 use rayon::prelude::*;
@@ -140,13 +142,13 @@ struct Args {
     #[arg(short, long)]
     n_cluster: usize,
 
-    /// initialization method
+    /// initialization method {`minmax`, `sharding`, `hart`, `grid`, `scs`}
     #[arg(short, long, default_value = "minmax")]
     m_init: String,
 }
 
 fn main() {
-    run_test();
+    // run_test();
     let args = Args::parse();
     fs::create_dir_all(&args.outpath).unwrap();
     let (data, fpaths) = get_matrices(args.inpath, args.side_len).unwrap();
@@ -165,6 +167,7 @@ fn main() {
         "sharding" => naive_sharding_init(&data, n_cluster, single_data_size),
         "hart" => hartigan_init(&data, n_cluster, single_data_size),
         "grid" => grid_init(&data, n_cluster, single_data_size),
+        "scs" => simple_cluster_seek(&data, n_cluster, single_data_size),
         _ => panic!("Invalid initialization method '{}'", args.m_init),
     };
     let file = File::create(Path::new(&args.outpath).join("initial_centroids_rs.txt")).unwrap();

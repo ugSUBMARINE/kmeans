@@ -1,7 +1,6 @@
-use crate::utils::dist_calc;
+use crate::utils::{dist_calc, par_dist_calc};
 use rand::prelude::*;
 use rayon::prelude::*;
-use std::usize;
 
 /// Get indices of the data to create initial clusters for k-means via kmeans++
 /// :parameter
@@ -98,7 +97,7 @@ pub fn naive_sharding_init(data: &[f32], k: usize, single_data_len: usize) -> Ve
 
 /// Get indices of the data to create initial clusters for k-means via hartigan method
 ///     Sort all point according to their distance to the mean point and then select K cluster from
-///     N dataspoints based on their indices with (1 +  (i − 1)N/K)
+///     N data points based on their indices with (1 +  (i − 1)N/K)
 /// :parameter
 /// *   data: the data to be clustered
 /// *   k: the number of clusters to be created
@@ -162,6 +161,15 @@ fn grid_idx(ranges: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
     res
 }
 
+/// Get indices of the data to create initial clusters for k-means via an even grid
+///     Lay an k-dimensional grid with a spacing that results in as close as possible k grid points
+///     and randomly remove grid points that are more than `k` to find initial centers
+/// :parameter
+/// *   data: the data to be clustered
+/// *   k: the number of clusters to be created
+/// *   single_data_len: length of a single piece of data in the data
+/// :return
+/// *   centroids: coordinates of data points to be used as centroids
 pub fn grid_init(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
     let grid_side_len = (f32::powf(k as f32, 1. / single_data_len as f32)).ceil();
     let mut maxs: Vec<f32> = vec![f32::NEG_INFINITY; single_data_len];
@@ -205,4 +213,55 @@ pub fn grid_init(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
         .iter()
         .flat_map(|x| x.clone())
         .collect::<Vec<f32>>()
+}
+
+/// Get indices of the data to create initial clusters for k-means via simple cluster seek method
+///     Use the first data point as first cluster then search through next data points until one is
+///     found that is further away than `t` to the last cluster center - repeat until enough
+///     center are found
+///     `t` is calculated as the maximum distance between point attributes / 2.5
+/// :parameter
+/// *   data: the data to be clustered
+/// *   k: the number of clusters to be created
+/// *   single_data_len: length of a single piece of data in the data
+/// :return
+/// *   centroids: coordinates of data points to be used as centroids
+pub fn simple_cluster_seek(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
+    let mut cluster_center: Vec<f32> = Vec::with_capacity(k);
+    let cc_max_size = k * single_data_len;
+    let mut maxs: Vec<f32> = vec![f32::NEG_INFINITY; single_data_len];
+    let mut mins: Vec<f32> = vec![f32::INFINITY; single_data_len];
+
+    for i in data.chunks_exact(single_data_len) {
+        for (cj, j) in maxs.iter_mut().enumerate() {
+            if *j < i[cj] {
+                *j = i[cj]
+            }
+        }
+        for (cj, j) in mins.iter_mut().enumerate() {
+            if *j > i[cj] {
+                *j = i[cj]
+            }
+        }
+    }
+    let t = dist_calc(&maxs, &mins) / 3.5;
+
+    let mut n_found = 0;
+    for (ci, i) in data.chunks_exact(single_data_len).enumerate() {
+        if ci == 0 {
+            cluster_center.extend_from_slice(i)
+        } else {
+            let cc_len = cluster_center.len();
+            if dist_calc(i, &cluster_center[(cc_len - single_data_len)..(cc_len)]) > t {
+                cluster_center.extend_from_slice(i);
+                n_found += 1;
+            }
+        }
+        if n_found >= k - 1 {
+            println!("Found enough cluster");
+            break;
+        }
+    }
+
+    cluster_center
 }

@@ -1,5 +1,7 @@
 use crate::find_representative;
-use crate::init_shemes::{grid_init, hartigan_init, maxmin_init, naive_sharding_init};
+use crate::init_shemes::{
+    grid_init, hartigan_init, maxmin_init, naive_sharding_init, simple_cluster_seek,
+};
 use crate::kmeans;
 use npyz::NpyFile;
 use rayon::prelude::*;
@@ -103,10 +105,11 @@ pub fn run_test() {
     let bytes = std::fs::read("./test_data.npy").unwrap();
     let data = NpyFile::new(&bytes[..]).unwrap().into_vec::<f32>().unwrap();
 
-    let single_data_size = 16;
-    let n_cluster = 100;
+    let single_data_size = 2;
+    let n_cluster = 1000;
 
     let mut centroids = maxmin_init(&data, n_cluster, single_data_size);
+    let mut centroids = simple_cluster_seek(&data, n_cluster, single_data_size);
     let mut centroids = naive_sharding_init(&data, n_cluster, single_data_size);
     let mut centroids = hartigan_init(&data, n_cluster, single_data_size);
     let mut centroids = grid_init(&data, n_cluster, single_data_size);
