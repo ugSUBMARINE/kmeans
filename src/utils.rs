@@ -1,9 +1,7 @@
 use crate::find_representative;
 use crate::init_shemes::{grid_init, hartigan_init, maxmin_init, naive_sharding_init};
 use crate::kmeans;
-use clap::Parser;
 use npyz::NpyFile;
-use rayon::prelude::*;
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -108,9 +106,9 @@ pub fn run_test() {
     let single_data_size = 16;
     let n_cluster = 100;
 
-    // let mut centroids = maxmin_init(&data, n_cluster, single_data_size);
-    // let mut centroids = naive_sharding_init(&data, n_cluster, single_data_size);
-    // let mut centroids = hartigan_init(&data, n_cluster, single_data_size);
+    let mut centroids = maxmin_init(&data, n_cluster, single_data_size);
+    let mut centroids = naive_sharding_init(&data, n_cluster, single_data_size);
+    let mut centroids = hartigan_init(&data, n_cluster, single_data_size);
     let mut centroids = grid_init(&data, n_cluster, single_data_size);
     let file = File::create("initial_centroids_rs.txt").unwrap();
     let mut file = BufWriter::new(file);
@@ -140,9 +138,9 @@ pub fn run_test() {
             .zip(cluster_asign.par_iter())
             .enumerate()
             .filter(|(_, (_, &c))| c == i)
-            .map(|(cx, (x, &c))| (cx, x))
+            .map(|(cx, (x, _))| (cx, x))
             .unzip();
-        let repr = match find_representative(test_sup) {
+        match find_representative(test_sup) {
             Some(x) => {
                 cluster_rep_idx.push(tsidx[x]);
             }

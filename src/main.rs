@@ -6,10 +6,11 @@
 use crate::init_shemes::{grid_init, hartigan_init, maxmin_init, naive_sharding_init};
 use crate::utils::{dist_calc, get_matrices, par_dist_calc, run_test};
 use clap::Parser;
-use npyz::NpyFile;
 use rayon::prelude::*;
+use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::path::Path;
 use std::usize;
 mod init_shemes;
 mod utils;
@@ -145,8 +146,7 @@ struct Args {
 }
 
 fn main() {
-    run_test()
-    /*
+    run_test();
     let args = Args::parse();
     fs::create_dir_all(&args.outpath).unwrap();
     let (data, fpaths) = get_matrices(args.inpath, args.side_len).unwrap();
@@ -160,9 +160,10 @@ fn main() {
     let n_cluster = args.n_cluster;
 
     let mut centroids = match args.m_init.as_str() {
-        "minmax" => maxmin_init(&data, n_cluster, single_data_size), wq
+        "minmax" => maxmin_init(&data, n_cluster, single_data_size),
         "sharding" => naive_sharding_init(&data, n_cluster, single_data_size),
         "hart" => hartigan_init(&data, n_cluster, single_data_size),
+        "grid" => grid_init(&data, n_cluster, single_data_size),
         _ => panic!("Invalid initialization method '{}'", args.m_init),
     };
     let file = File::create(Path::new(&args.outpath).join("initial_centroids_rs.txt")).unwrap();
@@ -211,5 +212,4 @@ fn main() {
     for v in cluster_rep_idx {
         writeln!(file, "{:?}", v).unwrap()
     }
-    */
 }

@@ -135,7 +135,7 @@ pub fn hartigan_init(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32>
 
     centroids
 }
-fn recursive_idx(ranges: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
+fn grid_idx(ranges: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
     let mut res: Vec<Vec<f32>> = vec![];
     let lengths: Vec<_> = ranges.iter().map(|x| x.len()).collect();
     let mut indices = vec![0; ranges.len()];
@@ -192,11 +192,7 @@ pub fn grid_init(data: &[f32], k: usize, single_data_len: usize) -> Vec<f32> {
             i_range
         });
     }
-    let mut grid_points = recursive_idx(all_ranges);
-    println!();
-    println!(">>>{}", grid_points.len());
-    println!(">>>{}", grid_side_len);
-    println!(">>>{}", maxs.len());
+    let mut grid_points = grid_idx(all_ranges);
     let mut gp_idx: Vec<_> = (0..grid_points.len()).collect();
     let mut rng = rand::thread_rng();
     gp_idx.shuffle(&mut rng);
